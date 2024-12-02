@@ -106,10 +106,10 @@ public class SceneTransitionManager : MonoBehaviour
         switch (direction)
         {
             case TransitionDirection.RightToLeft:
-                LeanTween.moveX(transitionImage, -Screen.width, transitionTime).setEase(LeanTweenType.easeInOutQuad);
+                LeanTween.moveX(transitionImage, Screen.width, transitionTime).setEase(LeanTweenType.easeInOutQuad);
                 break;
             case TransitionDirection.LeftToRight:
-                LeanTween.moveX(transitionImage, Screen.width, transitionTime).setEase(LeanTweenType.easeInOutQuad);
+                LeanTween.moveX(transitionImage, -Screen.width, transitionTime).setEase(LeanTweenType.easeInOutQuad);
                 break;
             case TransitionDirection.BottomToTop:
                 LeanTween.moveY(transitionImage, Screen.height, transitionTime).setEase(LeanTweenType.easeInOutQuad);
