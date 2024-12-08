@@ -1,42 +1,36 @@
 using UnityEngine;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 [Serializable]
 public class HammerCurlSettings
 {
+    // Existing settings remain the same
     [Header("Angle Thresholds")]
-    [Tooltip("Minimum angle when arm is fully extended")]
     [Range(0, 45)]
     public float minAngle = 10f;
 
-    [Tooltip("Maximum angle at top of curl")]
     [Range(90, 160)]
     public float maxAngle = 130f;
 
-    [Tooltip("Minimum angle change to count as movement")]
     [Range(5, 45)]
     public float angleThreshold = 20f;
 
     [Header("Rep Settings")]
-    [Tooltip("Minimum reps required for a set")]
     [Range(1, 20)]
     public int minRepsPerSet = 8;
 
-    [Tooltip("Maximum reps for a set")]
     [Range(1, 30)]
     public int maxRepsPerSet = 12;
 
-    [Tooltip("Time in seconds to hold at top of movement")]
     [Range(0.1f, 3f)]
     public float repHoldTime = 1f;
 
     [Header("Form Detection")]
-    [Tooltip("Maximum speed for curl (degrees per second)")]
     [Range(10f, 200f)]
     public float maxCurlSpeed = 100f;
 
-    [Tooltip("Minimum speed for curl (degrees per second)")]
     [Range(5f, 50f)]
     public float minCurlSpeed = 20f;
 }
@@ -46,6 +40,7 @@ public class HammerCurlTracker : MonoBehaviour
     [SerializeField]
     private HammerCurlSettings settings = new HammerCurlSettings();
 
+    // Existing state variables
     private int currentReps;
     public int currentSet = 1;
     private bool isMovingUp;
@@ -55,13 +50,16 @@ public class HammerCurlTracker : MonoBehaviour
     private float lastAngleCheckTime;
     private bool isHolding;
     private float repStartTime;
+
+    // New variables for form feedback averaging
+    private List<string> currentRepIssues = new List<string>();
+    private List<float> repFormScores = new List<float>();
+    private string previousRepFeedback = "Start your first rep";
+    private float previousRepFormScore = 100f;
+    private int formChecksThisRep = 0;
+
+    // Properties
     public float CurrentFormScore => currentFormScore;
-
-    [Header("Debug Visualization")]
-    public bool showDebugGizmos = true;
-    public Color gizmoColor = Color.green;
-
-    // Current state properties
     public int CurrentReps => currentReps;
     public int CurrentSet => currentSet;
     public float CurrentAngle => currentElbowAngle;
@@ -70,15 +68,12 @@ public class HammerCurlTracker : MonoBehaviour
 
     private List<string> currentFormIssues = new List<string>();
     private float setStartTime;
-    private float currentFormScore = 100f; // Start perfect, deduct for issues
-
-
+    private float currentFormScore = 100f;
 
     private void Start()
     {
         ResetTracker();
     }
-
 
     public void ResetTracker(bool resetSetNumber = false)
     {
@@ -92,13 +87,13 @@ public class HammerCurlTracker : MonoBehaviour
         repStartTime = Time.time;
         setStartTime = Time.time;
         currentFormIssues.Clear();
+        currentRepIssues.Clear();
+        repFormScores.Clear();
         currentFormScore = 100f;
+        formChecksThisRep = 0;
         FormFeedback = "Ready to start";
-    }
-
-    public List<string> GetCurrentFormIssues()
-    {
-        return new List<string>(currentFormIssues);
+        previousRepFeedback = "Start your first rep";
+        previousRepFormScore = 100f;
     }
 
     public void UpdateTracking(Vector3 shoulder, Vector3 elbow, Vector3 wrist)
@@ -106,9 +101,8 @@ public class HammerCurlTracker : MonoBehaviour
         float previousAngle = currentElbowAngle;
         currentElbowAngle = CalculateElbowAngle(shoulder, elbow, wrist);
 
-        // Calculate movement speed
         float deltaTime = Time.time - lastAngleCheckTime;
-        if (deltaTime > 0)  // Prevent division by zero
+        if (deltaTime > 0)
         {
             float angleSpeed = Mathf.Abs(currentElbowAngle - previousAngle) / deltaTime;
             CheckForm(angleSpeed);
@@ -117,34 +111,22 @@ public class HammerCurlTracker : MonoBehaviour
         lastAngleCheckTime = Time.time;
         CheckRepCompletion();
 
-        // Debug logging
-        //Debug.Log($"Current Angle: {currentElbowAngle:F1}Åã | Reps: {currentReps} | Set: {currentSet}");
+        // Show previous rep's feedback during current rep
+        FormFeedback = previousRepFeedback;
     }
 
     private float CalculateElbowAngle(Vector3 shoulder, Vector3 elbow, Vector3 wrist)
     {
         Vector3 upperArmVector = shoulder - elbow;
         Vector3 forearmVector = wrist - elbow;
-
-        // Calculate angle between vectors
-        float angle = Vector3.Angle(upperArmVector, forearmVector);
-
-        // Debug visualization
-        if (showDebugGizmos)
-        {
-            Debug.DrawLine(shoulder, elbow, Color.red, Time.deltaTime);
-            Debug.DrawLine(elbow, wrist, Color.blue, Time.deltaTime);
-        }
-
-        return angle;
+        return Vector3.Angle(upperArmVector, forearmVector);
     }
 
     private void CheckForm(float angleSpeed)
     {
-        currentFormIssues.Clear();
+        List<string> currentIssues = new List<string>();
         float formDeduction = 0f;
 
-        // Update movement direction when significant movement is detected
         float angleDiff = Mathf.Abs(currentElbowAngle - lastCheckedAngle);
         if (angleDiff > settings.angleThreshold)
         {
@@ -152,48 +134,75 @@ public class HammerCurlTracker : MonoBehaviour
             lastCheckedAngle = currentElbowAngle;
         }
 
-        // Form checks with priority and scoring
+        // Accumulate form issues for this check
         if (currentElbowAngle < settings.minAngle)
         {
-            currentFormIssues.Add("Incomplete range of motion at bottom");
+            currentIssues.Add("Incomplete range of motion at bottom");
             formDeduction += 15f;
-            FormFeedback = "Extend arms fully at bottom";
         }
         else if (currentElbowAngle > settings.maxAngle)
         {
-            currentFormIssues.Add("Excessive swing at top");
+            currentIssues.Add("Excessive swing at top");
             formDeduction += 20f;
-            FormFeedback = "Don't swing! Control the movement";
         }
         else if (angleSpeed > settings.maxCurlSpeed)
         {
-            currentFormIssues.Add("Movement too fast");
+            currentIssues.Add("Movement too fast");
             formDeduction += 10f;
-            FormFeedback = "Too fast! Slow down the movement";
         }
         else if (angleSpeed < settings.minCurlSpeed && angleSpeed > 0.1f)
         {
-            currentFormIssues.Add("Movement too slow/hesitant");
+            currentIssues.Add("Movement too slow/hesitant");
             formDeduction += 5f;
-            FormFeedback = "Move with more control and purpose";
-        }
-        else if (isHolding)
-        {
-            FormFeedback = "Good! Hold at the top";
-        }
-        else
-        {
-            FormFeedback = isMovingUp ? "Good form - curling up" : "Good form - lowering down";
         }
 
-        // Update form score
-        currentFormScore = Mathf.Max(0f, 100f - formDeduction);
+        // Add issues to the current rep's collection
+        currentRepIssues.AddRange(currentIssues);
+        repFormScores.Add(100f - formDeduction);
+        formChecksThisRep++;
+    }
+
+    private void CompleteRep()
+    {
+        if (isHolding && holdTimer >= settings.repHoldTime)
+        {
+            // Calculate average form score for the completed rep
+            float averageFormScore = repFormScores.Count > 0 ? repFormScores.Average() : 100f;
+
+            // Get most common form issues
+            var commonIssues = currentRepIssues
+                .GroupBy(x => x)
+                .OrderByDescending(g => g.Count())
+                .Take(2)
+                .Select(g => g.Key)
+                .ToList();
+
+            // Create feedback message for next rep
+            if (commonIssues.Any())
+            {
+                previousRepFeedback = $"Last rep ({averageFormScore:F0}%): {string.Join(", ", commonIssues)}";
+            }
+            else
+            {
+                previousRepFeedback = $"Good form! ({averageFormScore:F0}%)";
+            }
+
+            previousRepFormScore = averageFormScore;
+
+            // Reset rep tracking
+            currentReps++;
+            isHolding = false;
+            holdTimer = 0f;
+            repStartTime = Time.time;
+            currentRepIssues.Clear();
+            repFormScores.Clear();
+            formChecksThisRep = 0;
+        }
     }
 
     private void CheckRepCompletion()
     {
-        // Check for top position hold
-        if (currentElbowAngle >= settings.maxAngle * 0.9f)  // Allow slight variation at top
+        if (currentElbowAngle >= settings.maxAngle * 0.9f)
         {
             if (!isHolding)
             {
@@ -214,28 +223,9 @@ public class HammerCurlTracker : MonoBehaviour
             holdTimer = 0f;
         }
 
-        // Check for set completion
         if (currentReps >= settings.maxRepsPerSet)
         {
             CompleteSet();
-
-        }
-    }
-
-    private void CompleteRep()
-    {
-        if (isHolding && holdTimer >= settings.repHoldTime)
-        {
-            float repTime = Time.time - repStartTime;
-            currentReps++;
-            isHolding = false;
-            holdTimer = 0f;
-            repStartTime = Time.time;
-
-            FormFeedback = $"Good rep! {currentReps}/{settings.maxRepsPerSet}";
-
-            // Log rep statistics
-            Debug.Log($"Rep {currentReps} completed in {repTime:F2} seconds");
         }
     }
 
@@ -244,57 +234,30 @@ public class HammerCurlTracker : MonoBehaviour
         if (currentReps >= settings.maxRepsPerSet)
         {
             float setDuration = Time.time - setStartTime;
-
-            // Save the completed set data
-            WorkoutResultsManager.AddSet(
-                currentReps,
-                currentFormScore,
-                setDuration,
-                new List<string>(currentFormIssues)
-            );
-
-            // Reset for next set
             currentSet++;
             currentReps = 0;
             setStartTime = Time.time;
             currentFormIssues.Clear();
+            currentRepIssues.Clear();
+            repFormScores.Clear();
             currentFormScore = 100f;
             FormFeedback = "Set complete! Take a rest";
-            Debug.Log($"Set {currentSet - 1} completed!");
-            Debug.Log($"Saving set data - Reps: {currentReps}, Form Score: {currentFormScore}, Duration: {setDuration}");
+            previousRepFeedback = "Ready for next set";
+            formChecksThisRep = 0;
         }
     }
 
-    private void OnDrawGizmos()
+    public List<string> GetCurrentFormIssues()
     {
-        if (!showDebugGizmos) return;
-
-        // Draw current angle indicator
-        Gizmos.color = gizmoColor;
-        Vector3 position = transform.position;
-        float radius = 0.5f;
-
-        // Draw arc representing the current angle
-        int segments = 32;
-        float angleStep = currentElbowAngle / segments;
-        Vector3 previousPoint = position + new Vector3(Mathf.Cos(0) * radius, Mathf.Sin(0) * radius, 0);
-
-        for (int i = 1; i <= segments; i++)
-        {
-            float angle = i * angleStep * Mathf.Deg2Rad;
-            Vector3 newPoint = position + new Vector3(Mathf.Cos(angle) * radius, Mathf.Sin(angle) * radius, 0);
-            Gizmos.DrawLine(previousPoint, newPoint);
-            previousPoint = newPoint;
-        }
+        return new List<string>(currentRepIssues);
     }
 
-    // Optional: Method to force a rep completion (for testing)
+    // Test methods
     public void ForceCompleteRep()
     {
         CompleteRep();
     }
 
-    // Optional: Method to force a set completion (for testing)
     public void ForceCompleteSet()
     {
         CompleteSet();
