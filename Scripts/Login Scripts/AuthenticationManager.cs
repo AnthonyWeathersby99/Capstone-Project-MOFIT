@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.Networking;
 using System.Threading.Tasks;
+using System;
 
 
 public class AuthenticationManager : MonoBehaviour
@@ -140,6 +141,7 @@ private const string RedirectUrl = "https://dzi3ny7huab3j.cloudfront.net";
       else
       {
          Debug.Log("Success, Code exchange complete!");
+
 
          BADAuthenticationResultType authenticationResultType = JsonUtility.FromJson<BADAuthenticationResultType>(webRequest.downloadHandler.text);
          // Debug.Log("ID token: " + authenticationResultType.id_token);
@@ -282,7 +284,14 @@ private const string RedirectUrl = "https://dzi3ny7huab3j.cloudfront.net";
         UserSessionCache userSessionCache = new UserSessionCache();
         SaveDataManager.LoadJsonData(userSessionCache);
         string token = userSessionCache.getIdToken();
-        Debug.Log($"Retrieved ID Token: {token.Substring(0, 10)}..."); // Log first 10 chars of token
+
+        if (string.IsNullOrEmpty(token))
+        {
+            Debug.LogError("No valid ID token found in session cache");
+            return null;
+        }
+
+        Debug.Log($"Retrieved ID Token: {token.Substring(0, Math.Min(token.Length, 20))}..."); // Only log first 20 chars
         return token;
     }
 

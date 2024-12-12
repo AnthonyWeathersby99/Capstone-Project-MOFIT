@@ -5,6 +5,7 @@ using TMPro;
 using UnityEngine.SceneManagement;
 using YOLOv8WithOpenCVForUnityExample;
 using System.Linq;
+using System.Collections.Generic;
 
 public class WorkoutSceneUI : MonoBehaviour
 {
@@ -116,25 +117,22 @@ public class WorkoutSceneUI : MonoBehaviour
     {
         if (curlTracker != null && curlTracker.CurrentReps > 0)
         {
-            // Use average of previous rep scores as final form score
-            float avgFormScore = 100f; // Default if no issues
-            var issues = curlTracker.GetCurrentFormIssues();
-            if (issues.Any())
-            {
-                // Deduct points based on number of unique issues
-                avgFormScore = Mathf.Max(0, 100 - (issues.Distinct().Count() * 20));
-            }
+            // Get all rep scores from the current set
+            List<float> repScores = curlTracker.GetCurrentSetRepScores();
+            float avgFormScore = repScores.Any() ? repScores.Average() : 100f;
 
             float duration = Time.time - setStartTime;
+            var issues = curlTracker.GetCurrentFormIssues();
 
-            Debug.Log($"Finishing set with Score: {avgFormScore}, Duration: {duration}");
+            Debug.Log($"Finishing set with Average Score: {avgFormScore}, Duration: {duration}, Rep Scores: {string.Join(", ", repScores)}");
 
             WorkoutResultsManager.AddSet(
                 curlTracker.CurrentReps,
                 currentArm,
                 avgFormScore,
                 duration,
-                issues
+                issues,
+                repScores  // Add the rep scores parameter
             );
         }
 
@@ -145,8 +143,6 @@ public class WorkoutSceneUI : MonoBehaviour
             startButton.gameObject.SetActive(true);
             finishButton.gameObject.SetActive(false);
             SetStatsVisibility(false);
-
-            // Don't increment set number yet - wait for right arm completion
         }
         else
         {

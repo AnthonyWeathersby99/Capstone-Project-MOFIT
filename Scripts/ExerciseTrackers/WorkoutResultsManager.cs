@@ -19,6 +19,7 @@ public class WorkoutSet
     public int hour;
     public int minute;
     public int second;
+    public List<float> repScores;
 
     [NonSerialized] // This won't be serialized
     private DateTime _timestamp;
@@ -45,7 +46,7 @@ public class WorkoutSet
         }
     }
 
-    public WorkoutSet(int setNum, string arm, int reps, float formScore, float duration, List<string> issues)
+    public WorkoutSet(int setNum, string arm, int reps, float formScore, float duration, List<string> issues, List<float> repScores)
     {
         this.setNumber = setNum;
         this.arm = arm;
@@ -54,25 +55,31 @@ public class WorkoutSet
         this.duration = duration;
         this.formIssues = issues;
         this.timestamp = DateTime.Now;
-
-        Debug.Log($"Created WorkoutSet with timestamp: {this.timestamp:yyyy-MM-dd HH:mm:ss}");
+        this.repScores = repScores ?? new List<float>();
     }
 
     public string GetFormattedTimestamp()
     {
         return timestamp.ToString("HH:mm:ss");
     }
+    public float GetTrueAverageScore()
+    {
+        return repScores.Count > 0 ? repScores.Average() : averageFormScore;
+    }
 }
 
 [Serializable]
 public class WorkoutSession
 {
+    public string workoutId;
+    public string workoutType;
+    public float Duration; 
     public List<WorkoutSet> sets;
     public DateTime sessionDate;
     public float totalDuration;
     public string exerciseType;
     public int totalReps;
-    public int completedSetPairs; // Added to track completed left/right pairs
+    public int completedSetPairs; 
 
     public WorkoutSession()
     {
@@ -81,6 +88,9 @@ public class WorkoutSession
         totalDuration = 0f;
         totalReps = 0;
         completedSetPairs = 0;
+        workoutId = Guid.NewGuid().ToString();
+        workoutType = string.Empty;
+        Duration = 0f;
     }
 
     // Helper method to get average form score
@@ -131,7 +141,9 @@ public class WorkoutResultsManager : MonoBehaviour
         };
     }
 
-    public static void AddSet(int reps, string arm, float formScore, float duration, List<string> issues)
+
+
+    public static void AddSet(int reps, string arm, float formScore, float duration, List<string> issues, List<float> repScores)
     {
         if (currentSession == null)
         {
@@ -139,12 +151,7 @@ public class WorkoutResultsManager : MonoBehaviour
             StartNewSession("Hammer Curls");
         }
 
-        // Log the incoming data
-        Debug.Log($"Adding set - Arm: {arm}, Form Score: {formScore}, Duration: {duration}");
-
-        // Calculate the correct set number - if there are 2 sets, next is set 2
         int currentSetNumber = (int)Math.Ceiling((float)(currentSession.sets.Count + 1) / 2);
-        Debug.Log($"Calculated set number: {currentSetNumber} from {currentSession.sets.Count} sets");
 
         WorkoutSet newSet = new WorkoutSet(
             currentSetNumber,
@@ -152,7 +159,8 @@ public class WorkoutResultsManager : MonoBehaviour
             reps,
             formScore,
             duration,
-            issues
+            issues,
+            repScores
         );
 
         currentSession.sets.Add(newSet);
@@ -160,6 +168,5 @@ public class WorkoutResultsManager : MonoBehaviour
         currentSession.totalDuration += duration;
 
         SaveWorkoutSession(currentSession);
-        Debug.Log($"Added set {newSet.setNumber} - {arm} arm with form score {formScore} at {newSet.timestamp:HH:mm:ss}");
     }
 }

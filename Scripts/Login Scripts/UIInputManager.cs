@@ -58,6 +58,7 @@ public class UIInputManager : MonoBehaviour
             _unauthInterface.SetActive(false);
             _authInterface.SetActive(true);
             Debug.Log("Authentication successful, UI updated");
+            Debug.Log("Full Token for testing: " + _authenticationManager.GetIdToken());
         }
         else
         {

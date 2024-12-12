@@ -6,6 +6,8 @@ using System.Linq;
 using static PlasticPipe.PlasticProtocol.Messages.Serialization.ItemHandlerMessagesSerialization;
 using System.Net.NetworkInformation;
 using UnityEditor;
+using UnityEngine.SceneManagement;
+using System.Threading.Tasks;
 
 
 
@@ -27,16 +29,64 @@ public class WorkoutResultsUI : MonoBehaviour
 
     private MenuManager menuManager;
 
+    [Header("AWS Integration")]
+    private WorkoutAWSManager awsManager;
+    private bool isUploading = false;
+    [SerializeField] private GameObject uploadingPanel;
+
+
     private void Start()
     {
         menuManager = FindObjectOfType<MenuManager>();
+        awsManager = FindObjectOfType<WorkoutAWSManager>();
+
         if (menuManager != null)
         {
             menuManager.AddButton("NextSet", nextSetButton, "BodyTracker");
             menuManager.AddButton("CompleteWorkout", completeWorkoutButton, "MainMenu");
+
+            // Update the listener to handle async properly
+            if (completeWorkoutButton != null)
+            {
+                completeWorkoutButton.OnPress.AddListener((pos) =>
+                {
+                    _ = CompleteWorkout(pos);  // Fire and forget with _ =
+                });
+            }
         }
 
         LoadAndDisplayResults();
+    }
+
+    private async Task CompleteWorkout(Vector2 pos)
+    {
+        var session = WorkoutResultsManager.LoadLastSession();
+        if (session != null && awsManager != null && !isUploading)
+        {
+            isUploading = true;
+            if (uploadingPanel != null)
+                uploadingPanel.SetActive(true);
+
+            try
+            {
+                Debug.Log("Uploading workout session to AWS...");
+                await awsManager.UploadWorkoutSession(session);
+                Debug.Log("Workout session uploaded successfully");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Failed to upload workout session: {e.Message}");
+            }
+            finally
+            {
+                isUploading = false;
+                if (uploadingPanel != null)
+                    uploadingPanel.SetActive(false);
+            }
+        }
+
+        // Proceed to main menu
+        SceneManager.LoadScene("MainMenu");
     }
 
     private void LoadAndDisplayResults()
