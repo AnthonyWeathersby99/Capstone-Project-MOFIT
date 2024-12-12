@@ -1,7 +1,7 @@
-using UnityEngine;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEngine;
 
 [Serializable]
 public class WorkoutSet
@@ -58,10 +58,13 @@ public class WorkoutSet
         this.repScores = repScores ?? new List<float>();
     }
 
+    public WorkoutSet() { } // Required for JSON deserialization
+
     public string GetFormattedTimestamp()
     {
         return timestamp.ToString("HH:mm:ss");
     }
+
     public float GetTrueAverageScore()
     {
         return repScores.Count > 0 ? repScores.Average() : averageFormScore;
@@ -73,13 +76,13 @@ public class WorkoutSession
 {
     public string workoutId;
     public string workoutType;
-    public float Duration; 
+    public float Duration;
     public List<WorkoutSet> sets;
     public DateTime sessionDate;
     public float totalDuration;
     public string exerciseType;
     public int totalReps;
-    public int completedSetPairs; 
+    public int completedSetPairs;
 
     public WorkoutSession()
     {
@@ -105,7 +108,6 @@ public class WorkoutSession
     {
         return sets.Where(s => s.setNumber == pairNumber).ToList();
     }
-
 }
 
 public class WorkoutResultsManager : MonoBehaviour
@@ -140,8 +142,6 @@ public class WorkoutResultsManager : MonoBehaviour
             completedSetPairs = 0
         };
     }
-
-
 
     public static void AddSet(int reps, string arm, float formScore, float duration, List<string> issues, List<float> repScores)
     {

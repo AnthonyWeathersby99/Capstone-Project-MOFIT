@@ -17,18 +17,30 @@ public class UserProfileManager : MonoBehaviour
 
     public void Awake()
     {
-        // Initialize Unity AWS SDK
-        UnityInitializer.AttachToGameObject(this.gameObject);
+        Debug.Log("Initializing AWS SDK...");
 
-        // Use Cognito for obtaining credentials
-        CognitoAWSCredentials credentials = new CognitoAWSCredentials(
-            IDENTITY_POOL_ID,
-            RegionEndpoint.USWest1
-        );
+        try
+        {
+            // Initialize Unity AWS SDK
+            UnityInitializer.AttachToGameObject(this.gameObject);
+            Debug.Log("UnityInitializer attached successfully.");
 
-        // Initialize DynamoDB client
-        _dynamoDbClient = new AmazonDynamoDBClient(credentials, RegionEndpoint.USWest1);
-        Debug.Log("DynamoDB client initialized successfully.");
+            // Initialize credentials
+            CognitoAWSCredentials credentials = new CognitoAWSCredentials(
+                IDENTITY_POOL_ID,
+                RegionEndpoint.USWest1
+            );
+            Debug.Log("Cognito credentials initialized successfully.");
+
+            // Initialize DynamoDB client
+            _dynamoDbClient = new AmazonDynamoDBClient(credentials, RegionEndpoint.USWest1);
+            Debug.Log("DynamoDB client initialized successfully.");
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Error during AWS SDK initialization: {ex.Message}\n{ex.StackTrace}");
+            throw;
+        }
     }
 
     public Task<UserProfile> GetUserProfile(string userId)

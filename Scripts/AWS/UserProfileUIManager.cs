@@ -1,12 +1,15 @@
 using UnityEngine;
+using UnityEngine.UI;
 using TMPro;
 using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
 using System.Collections;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Linq;
 
 public class UserProfileUIManager : MonoBehaviour
 {
+    [Header("Input Fields")]
     [SerializeField] private TMP_InputField nameInput;
     [SerializeField] private TMP_InputField heightFeetInput;
     [SerializeField] private TMP_InputField heightInchesInput;
@@ -17,43 +20,117 @@ public class UserProfileUIManager : MonoBehaviour
     [SerializeField] private TMP_InputField startingWeightInput;
     [SerializeField] private TMP_InputField currentWeightInput;
     [SerializeField] private TMP_InputField goalWeightInput;
+
+    [Header("UI Panels")]
+    [SerializeField] private GameObject loadingPanel;
+    [SerializeField] private GameObject errorPanel;
+    [SerializeField] private GameObject profilePanel;
+    [SerializeField] private TextMeshProUGUI errorText;
+    [SerializeField] private Button retryButton;
     [SerializeField] private float refreshInterval = 5f;
 
     private UserProfileManager userProfileManager;
-    private UserProfile currentProfile;
     private AuthenticationManager authenticationManager;
-
+    private UserProfile currentProfile;
     private Coroutine refreshCoroutine;
 
-    private void Awake()
-    {
-        userProfileManager = FindObjectOfType<UserProfileManager>();
-        authenticationManager = FindObjectOfType<AuthenticationManager>();
-        if (userProfileManager == null)
-        {
-            Debug.LogError("UserProfileManager not found in the scene.");
-        }
-        else
-        {
-            Debug.Log("UserProfileManager found successfully.");
-        }
-        if (authenticationManager == null)
-        {
-            Debug.LogError("AuthenticationManager not found in the scene.");
-        }
-    }
+    private const int MAX_RETRIES = 3;
+    private int currentRetryCount = 0;
 
     private async void Start()
     {
-        if (userProfileManager != null)
+        ShowLoadingState(true);
+
+        userProfileManager = FindObjectOfType<UserProfileManager>();
+        authenticationManager = FindObjectOfType<AuthenticationManager>();
+
+        if (retryButton != null)
         {
-            await LoadProfileAsync();
-            AddListenersToInputFields();
-            StartRefreshCoroutine();
+            retryButton.onClick.AddListener(RetryLoading);
+        }
+
+        await LoadProfileWithRetry();
+    }
+
+    private async Task LoadProfileWithRetry()
+    {
+        while (currentRetryCount < MAX_RETRIES)
+        {
+            try
+            {
+                await LoadProfileAsync();
+                AddListenersToInputFields();
+                StartRefreshCoroutine();
+                ShowLoadingState(false);
+                return;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Profile load attempt {currentRetryCount + 1} failed: {e.Message}");
+                currentRetryCount++;
+
+                if (currentRetryCount >= MAX_RETRIES)
+                {
+                    ShowErrorState("Failed to load profile. Please check your internet connection and try again.");
+                    return;
+                }
+
+                await Task.Delay(2000); // Wait 2 seconds between retries
+            }
+        }
+    }
+
+    private void ShowLoadingState(bool isLoading)
+    {
+        if (loadingPanel != null) loadingPanel.SetActive(isLoading);
+        if (errorPanel != null) errorPanel.SetActive(false);
+        if (profilePanel != null) profilePanel.SetActive(!isLoading);
+    }
+
+    private void ShowErrorState(string message)
+    {
+        if (loadingPanel != null) loadingPanel.SetActive(false);
+        if (profilePanel != null) profilePanel.SetActive(false);
+        if (errorPanel != null)
+        {
+            errorPanel.SetActive(true);
+            if (errorText != null)
+                errorText.text = message;
+        }
+    }
+
+    public void RetryLoading()
+    {
+        currentRetryCount = 0;
+        ShowLoadingState(true);
+        _ = LoadProfileWithRetry();
+    }
+
+    private async Task LoadProfileAsync()
+    {
+        if (userProfileManager == null || authenticationManager == null)
+        {
+            throw new Exception("Required managers not found!");
+        }
+
+        string userId = authenticationManager.GetUserId();
+        Debug.Log($"Loading profile for userId: {userId}");
+
+        if (string.IsNullOrEmpty(userId))
+        {
+            throw new Exception("User ID is null or empty");
+        }
+
+        currentProfile = await userProfileManager.GetUserProfile(userId);
+
+        if (currentProfile != null)
+        {
+            Debug.Log($"Profile loaded successfully: {JsonUtility.ToJson(currentProfile)}");
+            UpdateUIWithProfile();
         }
         else
         {
-            Debug.LogError("Cannot start UserProfileUIManager: UserProfileManager is null.");
+            throw new Exception("Failed to load user profile");
         }
     }
 
@@ -100,98 +177,13 @@ public class UserProfileUIManager : MonoBehaviour
         }
         catch (Exception e)
         {
-            Debug.LogError($"Error refreshing profile: {e.Message}\nStack Trace: {e.StackTrace}");
-        }
-    }
-
-    private void OnDisable()
-    {
-        if (refreshCoroutine != null)
-        {
-            StopCoroutine(refreshCoroutine);
-        }
-    }
-
-    private async Task LoadProfileAsync()
-    {
-        try
-        {
-            if (userProfileManager == null)
-            {
-                Debug.LogError("Cannot load profile: UserProfileManager is null.");
-                return;
-            }
-
-            if (authenticationManager == null)
-            {
-                Debug.LogError("Cannot load profile: AuthenticationManager is null.");
-                return;
-            }
-
-            string userId = authenticationManager.GetUserId();
-            Debug.Log($"Attempting to get user profile for userId: {userId}");
-
-            if (string.IsNullOrEmpty(userId))
-            {
-                Debug.LogError("User ID is null or empty.");
-                return;
-            }
-
-            currentProfile = await userProfileManager.GetUserProfile(userId);
-
-            if (currentProfile != null)
-            {
-                Debug.Log("Profile loaded successfully.");
-                UpdateUIWithProfile();
-            }
-            else
-            {
-                Debug.Log("No existing profile found.");
-            }
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"Error loading profile: {e.Message}\nStack Trace: {e.StackTrace}");
-        }
-    }
-
-    private void AddListenersToInputFields()
-    {
-        AddListenerSafely(nameInput, "Name");
-        AddListenerSafely(currentWeightInput, "CurrentWeight");
-        AddListenerSafely(startingWeightInput, "StartingWeight");
-        AddListenerSafely(goalWeightInput, "GoalWeight");
-        AddListenerSafely(heightFeetInput, "HeightFeet");
-        AddListenerSafely(heightInchesInput, "HeightInches");
-        AddListenerSafely(birthdayDayInput, "BirthdayDay");
-        AddListenerSafely(birthdayMonthInput, "BirthdayMonth");
-        AddListenerSafely(birthdayYearInput, "BirthdayYear");
-        AddListenerSafely(sexInput, "Sex");
-    }
-
-    private void AddListenerSafely(TMP_InputField inputField, string fieldName)
-    {
-        if (inputField != null)
-        {
-            inputField.onEndEdit.AddListener((value) => SaveProfileAsync(fieldName, value).ConfigureAwait(false));
-        }
-        else
-        {
-            Debug.LogWarning($"Input field for {fieldName} not assigned in UserProfileUIManager");
+            Debug.LogError($"Error refreshing profile: {e.Message}");
         }
     }
 
     private void UpdateUIWithProfile()
     {
         Debug.Log("Updating UI with profile data:");
-        Debug.Log($"Name: {currentProfile.Name}");
-        Debug.Log($"Height: Feet: {currentProfile.HeightFeet}, Inches: {currentProfile.HeightInches}");
-        Debug.Log($"Current Weight: {currentProfile.CurrentWeight}");
-        Debug.Log($"Sex: {currentProfile.Sex}");
-        Debug.Log($"Birthday: {currentProfile.BirthdayDay}/{currentProfile.BirthdayMonth}/{currentProfile.BirthdayYear}");
-        Debug.Log($"Starting Weight: {currentProfile.StartingWeight}");
-        Debug.Log($"Goal Weight: {currentProfile.GoalWeight}");
-
         SetTextSafely(nameInput, currentProfile.Name);
         SetTextSafely(heightFeetInput, currentProfile.HeightFeet);
         SetTextSafely(heightInchesInput, currentProfile.HeightInches);
@@ -208,15 +200,37 @@ public class UserProfileUIManager : MonoBehaviour
     {
         if (inputField != null)
         {
-            inputField.text = value;
+            inputField.text = value ?? "";
         }
     }
 
-    private async Task SaveProfileAsync(string fieldName, string value)
+    private void AddListenersToInputFields()
     {
-        if (userProfileManager == null || currentProfile == null)
+        AddListenerSafely(nameInput, "Name");
+        AddListenerSafely(heightFeetInput, "HeightFeet");
+        AddListenerSafely(heightInchesInput, "HeightInches");
+        AddListenerSafely(currentWeightInput, "CurrentWeight");
+        AddListenerSafely(sexInput, "Sex");
+        AddListenerSafely(birthdayDayInput, "BirthdayDay");
+        AddListenerSafely(birthdayMonthInput, "BirthdayMonth");
+        AddListenerSafely(birthdayYearInput, "BirthdayYear");
+        AddListenerSafely(startingWeightInput, "StartingWeight");
+        AddListenerSafely(goalWeightInput, "GoalWeight");
+    }
+
+    private void AddListenerSafely(TMP_InputField inputField, string fieldName)
+    {
+        if (inputField != null)
         {
-            Debug.LogError("Cannot save profile: UserProfileManager or currentProfile is null.");
+            inputField.onEndEdit.AddListener((value) => SaveFieldAsync(fieldName, value));
+        }
+    }
+
+    private async void SaveFieldAsync(string fieldName, string value)
+    {
+        if (currentProfile == null)
+        {
+            Debug.LogError("Cannot save: current profile is null");
             return;
         }
 
@@ -225,41 +239,19 @@ public class UserProfileUIManager : MonoBehaviour
             UserId = currentProfile.UserId
         };
 
+        // Set only the field being updated
         switch (fieldName)
         {
-            case "Name":
-                updatedProfile.Name = value;
-                break;
-            case "CurrentWeight":
-                updatedProfile.CurrentWeight = value;
-                break;
-            case "StartingWeight":
-                updatedProfile.StartingWeight = value;
-                break;
-            case "GoalWeight":
-                updatedProfile.GoalWeight = value;
-                break;
-            case "HeightFeet":
-                updatedProfile.HeightFeet = value;
-                break;
-            case "HeightInches":
-                updatedProfile.HeightInches = value;
-                break;
-            case "BirthdayDay":
-                updatedProfile.BirthdayDay = value;
-                break;
-            case "BirthdayMonth":
-                updatedProfile.BirthdayMonth = value;
-                break;
-            case "BirthdayYear":
-                updatedProfile.BirthdayYear = value;
-                break;
-            case "Sex":
-                updatedProfile.Sex = value;
-                break;
-            default:
-                Debug.LogWarning($"Unhandled field name: {fieldName}");
-                return;
+            case "Name": updatedProfile.Name = value; break;
+            case "HeightFeet": updatedProfile.HeightFeet = value; break;
+            case "HeightInches": updatedProfile.HeightInches = value; break;
+            case "CurrentWeight": updatedProfile.CurrentWeight = value; break;
+            case "Sex": updatedProfile.Sex = value; break;
+            case "BirthdayDay": updatedProfile.BirthdayDay = value; break;
+            case "BirthdayMonth": updatedProfile.BirthdayMonth = value; break;
+            case "BirthdayYear": updatedProfile.BirthdayYear = value; break;
+            case "StartingWeight": updatedProfile.StartingWeight = value; break;
+            case "GoalWeight": updatedProfile.GoalWeight = value; break;
         }
 
         try
@@ -267,57 +259,38 @@ public class UserProfileUIManager : MonoBehaviour
             bool success = await userProfileManager.UpdateUserProfile(updatedProfile);
             if (success)
             {
-                Debug.Log($"Field {fieldName} updated successfully");
-                UpdateCurrentProfileField(fieldName, value);
+                Debug.Log($"Successfully updated {fieldName}");
+                // Update the current profile field
+                switch (fieldName)
+                {
+                    case "Name": currentProfile.Name = value; break;
+                    case "HeightFeet": currentProfile.HeightFeet = value; break;
+                    case "HeightInches": currentProfile.HeightInches = value; break;
+                    case "CurrentWeight": currentProfile.CurrentWeight = value; break;
+                    case "Sex": currentProfile.Sex = value; break;
+                    case "BirthdayDay": currentProfile.BirthdayDay = value; break;
+                    case "BirthdayMonth": currentProfile.BirthdayMonth = value; break;
+                    case "BirthdayYear": currentProfile.BirthdayYear = value; break;
+                    case "StartingWeight": currentProfile.StartingWeight = value; break;
+                    case "GoalWeight": currentProfile.GoalWeight = value; break;
+                }
             }
             else
             {
-                Debug.LogError($"Failed to update field {fieldName}");
+                Debug.LogError($"Failed to update {fieldName}");
             }
         }
         catch (Exception e)
         {
-            Debug.LogError($"Error saving profile: {e.Message}");
+            Debug.LogError($"Error saving {fieldName}: {e.Message}");
         }
     }
 
-    private void UpdateCurrentProfileField(string fieldName, string value)
+    private void OnDestroy()
     {
-        switch (fieldName)
+        if (refreshCoroutine != null)
         {
-            case "Name":
-                currentProfile.Name = value;
-                break;
-            case "CurrentWeight":
-                currentProfile.CurrentWeight = value;
-                break;
-            case "StartingWeight":
-                currentProfile.StartingWeight = value;
-                break;
-            case "GoalWeight":
-                currentProfile.GoalWeight = value;
-                break;
-            case "HeightFeet":
-                currentProfile.HeightFeet = value;
-                break;
-            case "HeightInches":
-                currentProfile.HeightInches = value;
-                break;
-            case "BirthdayDay":
-                currentProfile.BirthdayDay = value;
-                break;
-            case "BirthdayMonth":
-                currentProfile.BirthdayMonth = value;
-                break;
-            case "BirthdayYear":
-                currentProfile.BirthdayYear = value;
-                break;
-            case "Sex":
-                currentProfile.Sex = value;
-                break;
-            default:
-                Debug.LogWarning($"Unhandled field name: {fieldName}");
-                break;
+            StopCoroutine(refreshCoroutine);
         }
     }
 }

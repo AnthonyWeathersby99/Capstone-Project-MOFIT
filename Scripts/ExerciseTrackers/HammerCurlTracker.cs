@@ -8,15 +8,15 @@ public class HammerCurlSettings
 {
     [Header("Starting Position Range")]
     [Range(120, 180)]
-    public float minStartAngle = 140f;  // Minimum angle to count as starting position
+    public float minStartAngle = 140f;
     [Range(120, 180)]
-    public float maxStartAngle = 180f;  // Maximum angle to count as starting position
+    public float maxStartAngle = 180f;
 
     [Header("Peak Curl Position Range")]
     [Range(60, 120)]
-    public float minPeakAngle = 80f;    // Minimum angle at peak of curl
+    public float minPeakAngle = 80f;
     [Range(60, 120)]
-    public float maxPeakAngle = 110f;   // Maximum angle at peak of curl
+    public float maxPeakAngle = 110f;
 
     [Header("Rep Requirements")]
     [Range(30, 90)]
@@ -46,6 +46,11 @@ public class HammerCurlTracker : MonoBehaviour
     [SerializeField]
     private HammerCurlSettings settings = new HammerCurlSettings();
 
+    private const float PERFECT_CURL_ANGLE = 90f;
+    private const float START_ANGLE = 165f;
+    private const float MIN_SPEED = 20f;
+    private const float MAX_SPEED = 100f;
+
     private int currentReps;
     public int currentSet = 1;
     private bool isMovingUp;
@@ -55,8 +60,6 @@ public class HammerCurlTracker : MonoBehaviour
     private float lastAngleCheckTime;
     private bool isHolding;
     private float repStartTime;
-    private float repStartAngle;
-    private float peakAngle;
     private bool isValidRepInProgress;
 
     // Properties
@@ -70,19 +73,28 @@ public class HammerCurlTracker : MonoBehaviour
     private List<string> currentFormIssues = new List<string>();
     private List<string> currentRepIssues = new List<string>();
     private List<float> repFormScores = new List<float>();
+    private List<float> speedSamples = new List<float>();
     private float setStartTime;
     private float currentFormScore = 100f;
     private string previousRepFeedback = "Start your first rep";
     private float previousRepFormScore = 100f;
     private int formChecksThisRep = 0;
-
-    private const float PERFECT_CURL_ANGLE = 90f;
-    private const float GOOD_RANGE_THRESHOLD = 5f;
-    private const float PERFECT_RANGE_THRESHOLD = 1f;
+    private RepMetrics currentRepMetrics;
 
     private List<float> currentSetRepScores = new List<float>();
     private float lastRepScore = 0f;
 
+    private struct RepMetrics
+    {
+        public float startAngle;
+        public float peakAngle;
+        public float averageSpeed;
+        public float speedConsistency;
+        public bool properPause;
+        public List<string> formIssues;
+        public float rangeOfMotion;
+        public float duration;
+    }
 
     private void Start()
     {
@@ -92,6 +104,7 @@ public class HammerCurlTracker : MonoBehaviour
     public void ResetTracker(bool resetSetNumber = false)
     {
         currentSetRepScores.Clear();
+        speedSamples.Clear();
         lastRepScore = 0f;
         currentReps = 0;
         if (resetSetNumber)
@@ -101,8 +114,6 @@ public class HammerCurlTracker : MonoBehaviour
         holdTimer = 0f;
         lastCheckedAngle = 0f;
         repStartTime = Time.time;
-        repStartAngle = 0f;
-        peakAngle = 0f;
         isValidRepInProgress = false;
         setStartTime = Time.time;
         currentFormIssues.Clear();
@@ -113,6 +124,11 @@ public class HammerCurlTracker : MonoBehaviour
         FormFeedback = "Ready to start";
         previousRepFeedback = "Start your first rep";
         previousRepFormScore = 100f;
+
+        currentRepMetrics = new RepMetrics
+        {
+            formIssues = new List<string>()
+        };
     }
 
     public void UpdateTracking(Vector3 shoulder, Vector3 elbow, Vector3 wrist)
@@ -124,27 +140,43 @@ public class HammerCurlTracker : MonoBehaviour
         if (deltaTime > 0)
         {
             float angleSpeed = Mathf.Abs(currentElbowAngle - previousAngle) / deltaTime;
-            CheckForm(angleSpeed);
+            speedSamples.Add(angleSpeed);
 
-            // Track rep progress - Changed to use minStartAngle
             if (!isValidRepInProgress && currentElbowAngle >= settings.minStartAngle)
             {
-                // Start tracking a new potential rep
                 isValidRepInProgress = true;
                 repStartTime = Time.time;
-                repStartAngle = currentElbowAngle;
-                peakAngle = currentElbowAngle;
-                Debug.Log($"Started tracking new rep at angle: {currentElbowAngle}");
+                currentRepMetrics = new RepMetrics
+                {
+                    startAngle = currentElbowAngle,
+                    peakAngle = currentElbowAngle,
+                    formIssues = new List<string>()
+                };
+                speedSamples.Clear();
             }
             else if (isValidRepInProgress)
             {
-                // Track the highest point reached during the curl
-                if (currentElbowAngle < peakAngle)
+                if (currentElbowAngle < currentRepMetrics.peakAngle)
                 {
-                    peakAngle = currentElbowAngle;
-                    Debug.Log($"New peak curl angle: {peakAngle}");
+                    currentRepMetrics.peakAngle = currentElbowAngle;
+                    currentRepMetrics.properPause = CheckProperPause();
+                }
+
+                // Update metrics
+                currentRepMetrics.duration = Time.time - repStartTime;
+                currentRepMetrics.rangeOfMotion = currentRepMetrics.startAngle - currentRepMetrics.peakAngle;
+
+                // Calculate speed metrics
+                if (speedSamples.Count > 0)
+                {
+                    float avgSpeed = speedSamples.Average();
+                    float stdDev = CalculateStandardDeviation(speedSamples, avgSpeed);
+                    currentRepMetrics.averageSpeed = avgSpeed;
+                    currentRepMetrics.speedConsistency = 1f - (stdDev / avgSpeed);
                 }
             }
+
+            CheckForm(angleSpeed);
         }
 
         lastAngleCheckTime = Time.time;
@@ -160,11 +192,20 @@ public class HammerCurlTracker : MonoBehaviour
         return Vector3.Angle(upperArmVector, forearmVector);
     }
 
+    private bool CheckProperPause()
+    {
+        return isHolding && holdTimer >= settings.repHoldTime;
+    }
+
+    private float CalculateStandardDeviation(List<float> samples, float mean)
+    {
+        if (samples.Count < 2) return 0f;
+        float variance = samples.Sum(x => Mathf.Pow(x - mean, 2)) / (samples.Count - 1);
+        return Mathf.Sqrt(variance);
+    }
+
     private void CheckForm(float angleSpeed)
     {
-        List<string> currentIssues = new List<string>();
-        float formDeduction = 0f;
-
         float angleDiff = Mathf.Abs(currentElbowAngle - lastCheckedAngle);
         if (angleDiff > settings.angleThreshold)
         {
@@ -172,101 +213,181 @@ public class HammerCurlTracker : MonoBehaviour
             lastCheckedAngle = currentElbowAngle;
         }
 
-        // Accumulate form issues for this check
+        // Check for form issues
         if (currentElbowAngle < settings.minPeakAngle)
-        {
-            currentIssues.Add("Incomplete range of motion at bottom");
-            formDeduction += 15f;
-        }
+            currentRepMetrics.formIssues.Add("Incomplete range of motion");
         else if (currentElbowAngle > settings.maxStartAngle)
-        {
-            currentIssues.Add("Excessive swing at top");
-            formDeduction += 20f;
-        }
-        else if (angleSpeed > settings.maxCurlSpeed)
-        {
-            currentIssues.Add("Movement too fast");
-            formDeduction += 10f;
-        }
+            currentRepMetrics.formIssues.Add("Excessive swing at top");
 
-        // Add issues to the current rep's collection
-        currentRepIssues.AddRange(currentIssues);
-        repFormScores.Add(100f - formDeduction);
+        if (angleSpeed > settings.maxCurlSpeed)
+            currentRepMetrics.formIssues.Add("Movement too fast");
+        else if (angleSpeed < settings.minCurlSpeed && isValidRepInProgress)
+            currentRepMetrics.formIssues.Add("Movement too slow");
+
         formChecksThisRep++;
     }
-
 
     private void CompleteRep()
     {
         if (isHolding && holdTimer >= settings.repHoldTime)
         {
-            float formScore = lastRepScore; // Use the last calculated score
+            float formScore = CalculateFormScore(currentRepMetrics);
             currentReps++;
 
-            // Reset rep tracking but keep the scores list
+            // Store the score
+            lastRepScore = formScore;
+            currentSetRepScores.Add(formScore);
+
+            // Reset tracking
             isHolding = false;
             holdTimer = 0f;
             repStartTime = Time.time;
             currentRepIssues.Clear();
             repFormScores.Clear();
+            speedSamples.Clear();
             formChecksThisRep = 0;
             previousRepFormScore = formScore;
+
+            UpdateFeedback(currentRepMetrics, formScore);
         }
+    }
+
+    private void UpdateFeedback(RepMetrics metrics, float score)
+    {
+        if (metrics.duration < settings.minRepDuration)
+        {
+            previousRepFeedback = "Movement too quick - control the motion";
+        }
+        else if (!metrics.properPause)
+        {
+            previousRepFeedback = "Hold the curl at the top longer";
+        }
+        else
+        {
+            if (Mathf.Abs(metrics.peakAngle - PERFECT_CURL_ANGLE) <= 1f)
+                previousRepFeedback = $"Perfect form! ({score:F1}%)";
+            else if (Mathf.Abs(metrics.peakAngle - PERFECT_CURL_ANGLE) <= 5f)
+                previousRepFeedback = $"Good form ({score:F1}%)";
+            else if (metrics.peakAngle > PERFECT_CURL_ANGLE + 5f)
+                previousRepFeedback = $"Not deep enough: {metrics.peakAngle:F1}Åã ({score:F1}%), target: {PERFECT_CURL_ANGLE}Åã";
+            else
+                previousRepFeedback = $"Too deep: {metrics.peakAngle:F1}Åã ({score:F1}%), target: {PERFECT_CURL_ANGLE}Åã";
+        }
+    }
+
+    private float CalculateFormScore(RepMetrics metrics)
+    {
+        float score = 100f;
+
+        // Starting position score (25% weight)
+        float startScore = CalculateAngleScore(metrics.startAngle, START_ANGLE, 10f);
+
+        // Peak curl position score (35% weight)
+        float peakScore = CalculateAngleScore(metrics.peakAngle, PERFECT_CURL_ANGLE, 5f);
+
+        // Movement quality score (20% weight)
+        float speedScore = CalculateSpeedScore(metrics.averageSpeed, metrics.speedConsistency);
+
+        // Form maintenance score (20% weight)
+        float formScore = CalculateFormMaintenanceScore(metrics.formIssues);
+
+        // Calculate weighted total
+        score = (startScore * 0.25f) + (peakScore * 0.35f) +
+                (speedScore * 0.20f) + (formScore * 0.20f);
+
+        // Bonus for proper pause at peak
+        if (metrics.properPause) score = Mathf.Min(100f, score + 5f);
+
+        // Range of motion requirement
+        if (metrics.rangeOfMotion < settings.minRangeOfMotion)
+        {
+            score *= (metrics.rangeOfMotion / settings.minRangeOfMotion);
+        }
+
+        return Mathf.Max(0f, score);
+    }
+
+    private float CalculateAngleScore(float actual, float target, float tolerance)
+    {
+        float deviation = Mathf.Abs(actual - target);
+        if (deviation <= tolerance)
+            return 100f;
+
+        float maxDeviation = tolerance * 3f;
+        return Mathf.Max(0f, 100f * (1f - (deviation - tolerance) / maxDeviation));
+    }
+
+    private float CalculateSpeedScore(float avgSpeed, float consistency)
+    {
+        float speedScore = 100f;
+
+        // Speed within target range check
+        if (avgSpeed < MIN_SPEED)
+            speedScore *= (avgSpeed / MIN_SPEED);
+        else if (avgSpeed > MAX_SPEED)
+            speedScore *= (MAX_SPEED / avgSpeed);
+
+        // Apply consistency factor
+        speedScore *= consistency;
+
+        return speedScore;
+    }
+
+    private float CalculateFormMaintenanceScore(List<string> issues)
+    {
+        if (!issues.Any()) return 100f;
+
+        Dictionary<string, float> issuePenalties = new Dictionary<string, float>
+        {
+            {"Movement too fast", 15f},
+            {"Movement too slow", 10f},
+            {"Excessive swing", 20f},
+            {"Incomplete range of motion", 25f},
+            {"Improper starting position", 15f},
+            {"No pause at peak", 10f}
+        };
+
+        float totalPenalty = issues.Distinct().Sum(issue =>
+            issuePenalties.ContainsKey(issue) ? issuePenalties[issue] : 10f);
+
+        return Mathf.Max(0f, 100f - totalPenalty);
     }
 
     private void CheckRepCompletion()
     {
-        // Check if we're in starting position range
         bool isInStartPosition = currentElbowAngle >= settings.minStartAngle &&
                                currentElbowAngle <= settings.maxStartAngle;
 
-        // Check if we're in peak curl position range
         bool isInPeakPosition = currentElbowAngle >= settings.minPeakAngle &&
                               currentElbowAngle <= settings.maxPeakAngle;
 
-        // Start tracking when in starting position
         if (!isValidRepInProgress && isInStartPosition)
         {
             isValidRepInProgress = true;
             repStartTime = Time.time;
-            repStartAngle = currentElbowAngle;
-            peakAngle = currentElbowAngle;
-            isHolding = false;
+            currentRepMetrics = new RepMetrics
+            {
+                startAngle = currentElbowAngle,
+                peakAngle = currentElbowAngle,
+                formIssues = new List<string>()
+            };
+            speedSamples.Clear();
             Debug.Log($"Started tracking new rep at angle: {currentElbowAngle}");
         }
         else if (isValidRepInProgress)
         {
-            // Track the curl peak (smallest angle)
-            if (currentElbowAngle < peakAngle)
-            {
-                peakAngle = currentElbowAngle;
-                Debug.Log($"New peak curl angle: {peakAngle}");
-            }
-
-            // Check if we're in the peak position range
             if (isInPeakPosition)
             {
                 if (!isHolding)
                 {
                     isHolding = true;
                     holdTimer = 0f;
-                    Debug.Log("Started hold timer at peak");
                 }
-
                 holdTimer += Time.deltaTime;
             }
-            else
+            else if (isHolding && holdTimer >= settings.repHoldTime && isInStartPosition)
             {
-                // If we've held at the peak and now returning to start position
-                if (isHolding && holdTimer >= settings.repHoldTime)
-                {
-                    // Check if we've returned to starting position range
-                    if (isInStartPosition)
-                    {
-                        Debug.Log("Attempting to validate rep on return to start");
-                        ValidateAndCompleteRep();
-                    }
-                }
+                ValidateAndCompleteRep();
             }
         }
 
@@ -281,129 +402,72 @@ public class HammerCurlTracker : MonoBehaviour
         if (!isValidRepInProgress)
             return;
 
-        float repDuration = Time.time - repStartTime;
-        float formScore = CalculateFormScore(peakAngle);
+        currentRepMetrics.duration = Time.time - repStartTime;
+        float formScore = CalculateFormScore(currentRepMetrics);
 
-        Debug.Log($"Validating rep - Peak angle: {peakAngle:F1}Åã, Form score: {formScore:F1}%");
-
-        bool hasMinimumDuration = repDuration >= settings.minRepDuration;
-        bool hasHeldPeak = holdTimer >= settings.repHoldTime;
+        // Only check minimum duration
+        bool hasMinimumDuration = currentRepMetrics.duration >= settings.minRepDuration;
 
         // Build feedback message
-        if (!hasMinimumDuration)
+        if (!currentRepMetrics.properPause)
         {
-            previousRepFeedback = "Movement too quick - control the motion";
+            previousRepFeedback = "Try holding at the peak for better form";
         }
-        else if (!hasHeldPeak)
+        else if (currentRepMetrics.duration < settings.minRepDuration)
         {
-            previousRepFeedback = "Hold the curl at the top longer";
+            previousRepFeedback = "Slow down the movement for better control";
         }
         else
         {
-            // Provide angle-specific feedback
-            if (Mathf.Abs(peakAngle - PERFECT_CURL_ANGLE) <= PERFECT_RANGE_THRESHOLD)
-            {
+            // Angle-specific feedback
+            float angleDiff = Mathf.Abs(currentRepMetrics.peakAngle - PERFECT_CURL_ANGLE);
+            if (angleDiff <= 2f)
                 previousRepFeedback = $"Perfect form! ({formScore:F1}%)";
-            }
-            else if (Mathf.Abs(peakAngle - PERFECT_CURL_ANGLE) <= GOOD_RANGE_THRESHOLD)
-            {
+            else if (angleDiff <= 5f)
                 previousRepFeedback = $"Good form ({formScore:F1}%)";
-            }
-            else if (peakAngle > PERFECT_CURL_ANGLE + GOOD_RANGE_THRESHOLD)
-            {
-                previousRepFeedback = $"Not deep enough: {peakAngle:F1}Åã ({formScore:F1}%), target: {PERFECT_CURL_ANGLE}Åã";
-            }
+            else if (currentRepMetrics.peakAngle > PERFECT_CURL_ANGLE)
+                previousRepFeedback = $"Try curling deeper: {currentRepMetrics.peakAngle:F1}Åã ({formScore:F1}%)";
             else
-            {
-                previousRepFeedback = $"Too deep: {peakAngle:F1}Åã ({formScore:F1}%), target: {PERFECT_CURL_ANGLE}Åã";
-            }
+                previousRepFeedback = $"Don't curl too deep: {currentRepMetrics.peakAngle:F1}Åã ({formScore:F1}%)";
         }
 
-        // Always complete the rep if minimum requirements are met
-        if (hasMinimumDuration && hasHeldPeak)
+        // Complete rep if it meets minimum duration
+        if (hasMinimumDuration)
         {
-            Debug.Log("Completing rep with score: " + formScore);
+            Debug.Log($"Completing rep with score: {formScore}");
             CompleteRep();
         }
 
-        Debug.Log(previousRepFeedback);
-
         // Reset tracking for next rep
         isValidRepInProgress = false;
-        repStartAngle = currentElbowAngle;
-        peakAngle = currentElbowAngle;
+        currentRepMetrics = new RepMetrics
+        {
+            formIssues = new List<string>()
+        };
         isHolding = false;
         holdTimer = 0f;
     }
 
     private void CompleteSet()
     {
-        if (currentReps >= settings.maxRepsPerSet)
-        {
-            float setDuration = Time.time - setStartTime;
-            currentSet++;
-            currentReps = 0;
-            setStartTime = Time.time;
-            currentFormIssues.Clear();
-            currentRepIssues.Clear();
-            repFormScores.Clear();
-            currentFormScore = 100f;
-            FormFeedback = "Set complete! Take a rest";
-            previousRepFeedback = "Ready for next set";
-            formChecksThisRep = 0;
-        }
+        float setDuration = Time.time - setStartTime;
+        Debug.Log($"Completing set. Duration: {setDuration}s, Average Score: {GetCurrentSetAverageScore():F1}%");
+
+        currentReps = 0;
+        setStartTime = Time.time;
+        currentFormIssues.Clear();
+        currentRepIssues.Clear();
+        repFormScores.Clear();
+        speedSamples.Clear();
+        currentFormScore = 100f;
+        FormFeedback = "Set complete! Take a rest";
+        previousRepFeedback = "Ready for next set";
+        formChecksThisRep = 0;
     }
 
     public List<string> GetCurrentFormIssues()
     {
-        return new List<string>(currentRepIssues);
-    }
-
-    // Test methods
-    public void ForceCompleteRep()
-    {
-        CompleteRep();
-    }
-
-    public void ForceCompleteSet()
-    {
-        CompleteSet();
-    }
-
-    private float CalculateFormScore(float peakAngle)
-    {
-        float score;
-
-        // Perfect form (89-91 degrees)
-        if (Mathf.Abs(peakAngle - PERFECT_CURL_ANGLE) <= PERFECT_RANGE_THRESHOLD)
-        {
-            score = 100f;
-        }
-        // Good form (85-95 degrees)
-        else if (Mathf.Abs(peakAngle - PERFECT_CURL_ANGLE) <= GOOD_RANGE_THRESHOLD)
-        {
-            score = 90f;
-        }
-        else
-        {
-            // Calculate percentage based on how far off from 90 degrees
-            float deviation = Mathf.Abs(peakAngle - PERFECT_CURL_ANGLE);
-            float maxDeviation = 30f; // Maximum degrees off before 0%
-            score = Mathf.Max(0f, 100f * (1f - deviation / maxDeviation));
-        }
-
-        // Apply penalties for form issues
-        if (currentRepIssues.Any())
-        {
-            // Deduct points for each unique form issue
-            float penalty = currentRepIssues.Distinct().Count() * 10f;
-            score = Mathf.Max(0f, score - penalty);
-        }
-
-        lastRepScore = score;
-        currentSetRepScores.Add(score);
-
-        return score;
+        return currentRepMetrics.formIssues.Distinct().ToList();
     }
 
     public float GetCurrentSetAverageScore()
@@ -418,24 +482,27 @@ public class HammerCurlTracker : MonoBehaviour
         return new List<float>(currentSetRepScores);
     }
 
+    // Test methods
+    public void ForceCompleteRep()
+    {
+        CompleteRep();
+    }
+
+    public void ForceCompleteSet()
+    {
+        CompleteSet();
+    }
+
     private string GetAngleFeedback(float peakAngle)
     {
         float deviation = peakAngle - PERFECT_CURL_ANGLE;
-        if (Mathf.Abs(deviation) <= PERFECT_RANGE_THRESHOLD)
-        {
+        if (Mathf.Abs(deviation) <= 1f)
             return "Perfect form!";
-        }
-        else if (Mathf.Abs(deviation) <= GOOD_RANGE_THRESHOLD)
-        {
+        else if (Mathf.Abs(deviation) <= 5f)
             return "Good form";
-        }
-        else if (deviation > GOOD_RANGE_THRESHOLD)
-        {
+        else if (deviation > 5f)
             return "Curl not deep enough";
-        }
         else
-        {
             return "Curl too deep";
-        }
     }
 }

@@ -3,7 +3,6 @@ using UnityEngine.UI;
 using TMPro;
 using System;
 using System.Linq;
-using static PlasticPipe.PlasticProtocol.Messages.Serialization.ItemHandlerMessagesSerialization;
 using System.Net.NetworkInformation;
 using UnityEditor;
 using UnityEngine.SceneManagement;
@@ -40,17 +39,23 @@ public class WorkoutResultsUI : MonoBehaviour
         menuManager = FindObjectOfType<MenuManager>();
         awsManager = FindObjectOfType<WorkoutAWSManager>();
 
+        if (awsManager == null)
+        {
+            Debug.LogError("WorkoutAWSManager not found in scene. Creating one...");
+            GameObject awsManagerObj = new GameObject("WorkoutAWSManager");
+            awsManager = awsManagerObj.AddComponent<WorkoutAWSManager>();
+        }
+
         if (menuManager != null)
         {
             menuManager.AddButton("NextSet", nextSetButton, "BodyTracker");
             menuManager.AddButton("CompleteWorkout", completeWorkoutButton, "MainMenu");
 
-            // Update the listener to handle async properly
             if (completeWorkoutButton != null)
             {
-                completeWorkoutButton.OnPress.AddListener((pos) =>
+                completeWorkoutButton.OnPress.AddListener(async (pos) =>
                 {
-                    _ = CompleteWorkout(pos);  // Fire and forget with _ =
+                    await CompleteWorkout(pos);
                 });
             }
         }
@@ -60,8 +65,23 @@ public class WorkoutResultsUI : MonoBehaviour
 
     private async Task CompleteWorkout(Vector2 pos)
     {
+        // Check if awsManager is null first
+        if (awsManager == null)
+        {
+            Debug.LogError("WorkoutAWSManager not found. Make sure it exists in the scene.");
+            SceneManager.LoadScene("MainMenu");
+            return;
+        }
+
         var session = WorkoutResultsManager.LoadLastSession();
-        if (session != null && awsManager != null && !isUploading)
+        if (session == null)
+        {
+            Debug.LogError("No workout session found to upload.");
+            SceneManager.LoadScene("MainMenu");
+            return;
+        }
+
+        if (!isUploading)
         {
             isUploading = true;
             if (uploadingPanel != null)
@@ -69,13 +89,14 @@ public class WorkoutResultsUI : MonoBehaviour
 
             try
             {
-                Debug.Log("Uploading workout session to AWS...");
+                Debug.Log($"Uploading workout session to AWS... Session ID: {session.workoutId}");
+                Debug.Log($"Session contains {session.sets?.Count ?? 0} sets");
                 await awsManager.UploadWorkoutSession(session);
                 Debug.Log("Workout session uploaded successfully");
             }
             catch (Exception e)
             {
-                Debug.LogError($"Failed to upload workout session: {e.Message}");
+                Debug.LogError($"Failed to upload workout session: {e.Message}\nStack trace: {e.StackTrace}");
             }
             finally
             {

@@ -23,7 +23,7 @@ public class WorkoutSceneUI : MonoBehaviour
     [SerializeField] private YOLOv8PoseEstimationExample poseEstimation;
 
     private float setStartTime;
-    private string currentArm = "Left"; // Start with left arm
+    public string currentArm = "Left"; // Start with left arm
     private bool isFirstArmComplete = false;
 
     [Header("Countdown")]
@@ -79,7 +79,7 @@ public class WorkoutSceneUI : MonoBehaviour
         {
             curlTracker.ResetTracker();
 
-            // Calculate correct set number based on completed pairs
+            // Add 1 to completedSetPairs for the current set number
             int newSetNumber = session.completedSetPairs + 1;
             curlTracker.currentSet = newSetNumber;
 
@@ -218,7 +218,6 @@ public class WorkoutSceneUI : MonoBehaviour
     private void SetStatsVisibility(bool visible)
     {
         repCountText?.gameObject.SetActive(visible);
-        setCountText?.gameObject.SetActive(visible);
         formFeedbackText?.gameObject.SetActive(visible);
         angleText?.gameObject.SetActive(visible);
         currentArmText?.gameObject.SetActive(visible);
