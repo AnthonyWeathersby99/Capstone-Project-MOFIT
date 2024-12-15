@@ -3,6 +3,7 @@
 ## Overview
 MOFIT is an application that strives to improve the health of its users by training their muscles using data to safely determine an individual’s proper rep range, number of sets, speed, and range of motion for their exercises. MOFIT will keep track of your progress throughout your entire fitness journey and adapt your workout plan as you increase your intensity so you never feel as if you are not making progress within the app. MOFIT will be developed as an app in Unity primarily for Android devices to utilize their cameras to track the user’s movements. 
 
+Video Demonstration: https://youtu.be/RY8dtfLHozE?si=hYSLDiNsZuM2VbsC
 
 ## Requirements
 
