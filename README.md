@@ -17,6 +17,7 @@ Video Demonstration: https://youtu.be/RY8dtfLHozE?si=hYSLDiNsZuM2VbsC
 - Only Cal State Fullerton Email addresses currently have access to the drive link
 - Download the Latest APK file available
 - Install on your local device
+- Note: Older devices may experience issues with their user information loading properly and their camera framerate being low.
 
 ## Setup
 In order to use the MOFIT application, the user is required to create an account through the app
